@@ -1,4 +1,4 @@
-module your_module_name
+module golangtesting
 
 go 1.24.5
 
