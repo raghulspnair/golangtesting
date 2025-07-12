@@ -3,6 +3,7 @@ FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 COPY . .
+COPY go.mod go.sum ./
 RUN go build -o app testing.go
 
 # Stage 2: Run the app using a tiny image
