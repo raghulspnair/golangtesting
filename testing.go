@@ -1,93 +1,105 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
-// User model
 type User struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 	Age  int    `json:"age"`
 }
 
-// Mock database
-var users = []User{
-	{ID: 1, Name: "Ravi", Age: 25},
-	{ID: 2, Name: "Priya", Age: 30},
-}
+var db *sql.DB
 
-// Home handler
 func homeHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "Welcome to GoLang API!")
+	fmt.Fprintln(w, "Welcome to Go + MySQL API!")
 }
 
-// Get all users
 func getUsersHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, name, age FROM users")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		rows.Scan(&u.ID, &u.Name, &u.Age)
+		users = append(users, u)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(users)
 }
 
-// Get user by ID
 func getUserByIDHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := strings.TrimPrefix(r.URL.Path, "/users/")
-	id, err := strconv.Atoi(idStr)
+	id, _ := strconv.Atoi(idStr)
+
+	var u User
+	err := db.QueryRow("SELECT id, name, age FROM users WHERE id = ?", id).Scan(&u.ID, &u.Name, &u.Age)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		http.Error(w, "User not found", 404)
 		return
 	}
 
-	for _, user := range users {
-		if user.ID == id {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(user)
-			return
-		}
-	}
-
-	http.Error(w, "User not found", http.StatusNotFound)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(u)
 }
 
-// Add a new user (mock)
 func createUserHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST is allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "Only POST allowed", 405)
 		return
 	}
 
-	var newUser User
-	err := json.NewDecoder(r.Body).Decode(&newUser)
+	var u User
+	json.NewDecoder(r.Body).Decode(&u)
+
+	result, err := db.Exec("INSERT INTO users (name, age) VALUES (?, ?)", u.Name, u.Age)
 	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, err.Error(), 500)
 		return
 	}
 
-	newUser.ID = len(users) + 1
-	users = append(users, newUser)
+	id, _ := result.LastInsertId()
+	u.ID = int(id)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(newUser)
+	json.NewEncoder(w).Encode(u)
 }
 
 func main() {
+	dsn := "root:password@tcp(db:3306)/testdb"
+	var err error
+	db, err = sql.Open("mysql", dsn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			getUsersHandler(w, r)
 		} else if r.Method == http.MethodPost {
 			createUserHandler(w, r)
-		} else {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
 	})
 	http.HandleFunc("/users/", getUserByIDHandler)
 
-	fmt.Println("Server started at http://localhost:8080")
+	fmt.Println("Server running at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
